@@ -203,8 +203,10 @@ async def list_documents(x_tenant_id: str = Header(..., alias="X-Tenant-ID"), db
 
 @router.delete("/api/v1/documents/{doc_id}")
 async def delete_document(doc_id: str, x_tenant_id: str = Header(..., alias="X-Tenant-ID"), db: Session = Depends(get_db)):
-    db.execute(text("DELETE FROM documents WHERE id = :id AND tenant_id = :tid"), {"id": doc_id, "tid": x_tenant_id})
+    result = db.execute(text("DELETE FROM documents WHERE id = :id AND tenant_id = :tid"), {"id": doc_id, "tid": x_tenant_id})
     db.commit()
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
     return {"status": "success"}
 
 # --- RENAME CHAT ---

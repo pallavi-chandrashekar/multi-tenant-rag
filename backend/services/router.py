@@ -21,11 +21,20 @@ def route_query(query: str):
     # 4. LLM ROUTER (Slow Path)
     print("DEBUG: Fast-Path missed. Asking LLM...")
     system_prompt = """
-    You are a Router. Classify the user query into ONE of these strategies:
-    1. "llm_only": Greetings, small talk, or general knowledge NOT about files.
-    2. "summary": Requests to summarize or explain the document content.
-    3. "hybrid": Specific questions about the uploaded files.
-    
+    You are a Router for a document-grounded assistant. The user has uploaded
+    documents, and ANY informational or factual question must be answered from
+    those documents. Classify the user query into ONE of these strategies:
+
+    1. "llm_only": ONLY greetings, small talk, thanks, or meta questions about
+       the assistant itself (e.g. "hi", "who are you", "thank you"). Never use
+       this for a question that asks for facts, policies, numbers, or how-to.
+    2. "summary": Requests to summarize or give an overview of the documents.
+    3. "hybrid": Any factual/informational question (policies, numbers, dates,
+       definitions, procedures, "how many", "what is", "when", "where", etc.).
+
+    When in doubt, choose "hybrid" -- the retrieval layer safely abstains if the
+    documents do not contain the answer.
+
     Output ONLY the strategy name (lowercase).
     """
     

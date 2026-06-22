@@ -208,7 +208,7 @@ class RetrievalService:
         if not document_ids:
             return {}
         rows = db.execute(
-            text("SELECT id, filename FROM documents WHERE id = ANY(:ids)"),
+            text("SELECT id, filename FROM documents WHERE id::text = ANY(:ids)"),
             {"ids": document_ids},
         ).fetchall()
         return {str(r.id): r.filename for r in rows}

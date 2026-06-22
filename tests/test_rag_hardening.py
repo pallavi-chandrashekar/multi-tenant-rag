@@ -9,6 +9,7 @@ evaluation harness. Live end-to-end checks live in `test-scenarios.py`
 import pytest
 
 from backend.config import settings
+from backend.services.ingestion import smart_split_text
 from backend.services.retrieval_service import (
     RetrievalService,
     compute_keyword_score,
@@ -64,6 +65,69 @@ def test_confidence_is_best_combined_score():
     results = [{"combined_score": 0.3}, {"combined_score": 0.81}, {"combined_score": 0.5}]
     assert svc.confidence(results) == 0.81
     assert svc.confidence([]) == 0.0
+
+
+# --------------------------------------------------------------------------
+# Chunking -- sentence-aware, never splits a word (regression guard)
+# --------------------------------------------------------------------------
+def test_chunker_never_splits_words():
+    # Regression: the previous fixed-window splitter cut words in half
+    # (e.g. "receipt" -> "rec" + "eipt"), which silently broke keyword search
+    # and fact grounding. Every emitted token must be a whole source token.
+    text = (
+        "Business expenses under seventy five dollars do not require a receipt. "
+        "Expenses of seventy five dollars or more must include an itemized "
+        "receipt and be submitted within thirty days of purchase. "
+    ) * 6
+    source_tokens = set(text.split())
+    chunks = smart_split_text(text, chunk_size=120, overlap=30)
+
+    assert len(chunks) > 1, "expected multiple chunks to exercise boundaries"
+    for chunk in chunks:
+        for token in chunk.split():
+            assert token in source_tokens, f"chunk contains partial token {token!r}"
+    # The split-prone word survives intact somewhere.
+    assert any("receipt" in c for c in chunks)
+
+
+def test_chunker_keeps_fact_sentence_intact():
+    text = (
+        "The remote work policy allows three days per week. "
+        "Business expenses under $75 do not require a receipt. "
+        "Sick leave is provided separately at 10 days per year."
+    )
+    chunks = smart_split_text(text, chunk_size=200, overlap=20)
+    assert any(
+        "Business expenses under $75 do not require a receipt." in c for c in chunks
+    )
+
+
+def test_chunker_multiple_bounded_chunks_no_data_loss():
+    sentences = [f"This is fact number {i} about topic {i}." for i in range(30)]
+    text = " ".join(sentences)
+    chunks = smart_split_text(text, chunk_size=120, overlap=30)
+
+    assert len(chunks) > 1
+    # Bounded (a little slack for the carried overlap tail).
+    for c in chunks:
+        assert len(c) <= 120 + 60
+    # Every original sentence is preserved in at least one chunk.
+    for s in sentences:
+        assert any(s in c for c in chunks)
+
+
+def test_chunker_oversized_sentence_kept_whole():
+    # A single sentence longer than chunk_size cannot be split on a boundary,
+    # so it is emitted whole rather than cut mid-word.
+    long_sentence = ("supercalifragilistic " * 20).strip() + "."
+    chunks = smart_split_text(long_sentence, chunk_size=100, overlap=20)
+    assert chunks == [long_sentence]
+
+
+def test_chunker_edge_cases():
+    assert smart_split_text("") == []
+    assert smart_split_text("   \n  ") == []
+    assert smart_split_text("Just one sentence.") == ["Just one sentence."]
 
 
 # --------------------------------------------------------------------------

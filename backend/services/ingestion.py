@@ -1,46 +1,57 @@
+from __future__ import annotations
+
+import re
 import uuid
 import io
-from sqlalchemy.orm import Session
-from fastapi import UploadFile
-from backend.models import Document, Chunk
-from backend.services.embeddings import get_embeddings
-from pypdf import PdfReader  # Requires 'pypdf' in requirements.txt
+from typing import TYPE_CHECKING
 
-def smart_split_text(text: str, chunk_size: int = 500, overlap: int = 50):
+# Heavy / optional dependencies (fastapi, pgvector via models, pypdf) are
+# imported lazily inside the functions that need them so that this module --
+# and the pure ``smart_split_text`` chunker -- stays importable for unit tests
+# and tooling with only the standard library available.
+if TYPE_CHECKING:
+    from fastapi import UploadFile
+    from sqlalchemy.orm import Session
+
+# Sentence terminator (., !, ?) followed by whitespace, or a hard newline break.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def smart_split_text(text: str, chunk_size: int = 500, overlap: int = 80):
+    """Group whole sentences into ``chunk_size``-bounded chunks.
+
+    Unlike a fixed character window, this never splits a word or a sentence:
+    sentences are packed greedily up to ``chunk_size`` and a word-boundary
+    ``overlap`` tail is carried into the next chunk so facts that straddle a
+    boundary remain retrievable. Keeping tokens (e.g. "receipt", "$75") intact
+    is what lets keyword search and grounded generation actually find them.
     """
-    Splits text by respecting sentence boundaries (periods, newlines) 
-    rather than cutting words in half.
-    """
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+
     chunks = []
-    start = 0
-    text_len = len(text)
+    current = ""
+    for sent in sentences:
+        if current and len(current) + 1 + len(sent) > chunk_size:
+            chunks.append(current.strip())
+            # Carry a word-aligned overlap tail into the next chunk.
+            if overlap > 0:
+                tail = current[-overlap:]
+                space = tail.find(" ")
+                current = tail[space + 1:] if space != -1 else ""
+            else:
+                current = ""
+        current = f"{current} {sent}".strip() if current else sent
 
-    while start < text_len:
-        end = start + chunk_size
-        
-        # If we are not at the end of text, try to find the last period or newline
-        if end < text_len:
-            # Look for the last period/newline within the last 20% of the chunk
-            lookback = text[end-100:end]
-            last_period = lookback.rfind('.')
-            last_newline = lookback.rfind('\n')
-            
-            break_point = max(last_period, last_newline)
-            
-            if break_point != -1:
-                # Adjust end to the found sentence break
-                end = (end - 100) + break_point + 1
-        
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        
-        # Move forward, respecting overlap
-        start = end - overlap
-        
+    if current.strip():
+        chunks.append(current.strip())
+
     return chunks
 
-async def process_document(file: UploadFile, tenant_id: str, db: Session):
+async def process_document(file: "UploadFile", tenant_id: str, db: "Session"):
+    from backend.models import Document, Chunk
+    from backend.services.embeddings import get_embeddings
+    from pypdf import PdfReader  # Requires 'pypdf' in requirements.txt
+
     # 1. Read Content based on File Type
     content = await file.read()
     filename = file.filename.lower()
@@ -100,9 +111,11 @@ async def process_document(file: UploadFile, tenant_id: str, db: Session):
     
     return str(doc_id)
 
-def delete_tenant_data(tenant_id: str, db: Session):
+def delete_tenant_data(tenant_id: str, db: "Session"):
     """
     Security: Only deletes data belonging to the specific tenant_id.
     """
+    from backend.models import Document
+
     db.query(Document).filter(Document.tenant_id == tenant_id).delete()
     db.commit()
