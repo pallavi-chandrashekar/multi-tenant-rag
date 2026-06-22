@@ -1,0 +1,32 @@
+[
+  {
+    "query": "What is the remote work policy?",
+    "expected_keywords": ["remote", "work"],
+    "expect_unknown": false
+  },
+  {
+    "query": "How many vacation days do employees get?",
+    "expected_keywords": ["vacation"],
+    "expect_unknown": false
+  },
+  {
+    "query": "What are the steps to handle a Sev-1 incident?",
+    "expected_keywords": ["incident", "sev"],
+    "expect_unknown": false
+  },
+  {
+    "query": "How do I reset my password?",
+    "expected_keywords": ["password"],
+    "expect_unknown": false
+  },
+  {
+    "query": "What is the expense reimbursement limit without a receipt?",
+    "expected_keywords": ["75", "receipt"],
+    "expect_unknown": false
+  },
+  {
+    "query": "What is the airspeed velocity of an unladen swallow?",
+    "expected_keywords": [],
+    "expect_unknown": true
+  }
+]

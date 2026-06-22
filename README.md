@@ -35,6 +35,33 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design.
 
 ---
 
+## Problem
+
+Enterprises adopt LLMs faster than the controls that make them safe on internal
+knowledge. The recurring failure modes:
+
+- **Hallucination** — ungrounded models answer confidently from parametric memory.
+- **No provenance** — answers can't be traced to a source, so they can't be audited.
+- **Weak isolation** — multi-tenant systems risk leaking one tenant's data to another.
+- **No measurement** — RAG ships with no metric for citations, abstention, or groundedness.
+
+---
+
+## Solution
+
+This architecture codifies the controls instead of just documenting them:
+
+- **Grounded generation** over tenant-scoped retrieved context only.
+- **Citations** on every answer (document, chunk, retrieval scores).
+- **Abstention** — *"I don't know based on the available documents."* on low confidence.
+- **Strict multi-tenancy** filtered at the SQL layer, asserted by tests.
+- **Hybrid retrieval** so exact-term matches survive embedding drift.
+- **Built-in evaluation + observability** to measure and watch quality in production.
+
+See [`docs/niw-impact.md`](docs/niw-impact.md) for the broader impact framing.
+
+---
+
 ## Features
 
 - 🧠 **Intent router** — `LLM_ONLY`, `SUMMARY`, `SEARCH` modes.
@@ -137,7 +164,9 @@ Implemented (not just documented) — see
 
 ## Evaluation
 
-`backend/evaluation/evaluator.py` provides an offline harness that scores:
+The harness scores (pure metric functions live in
+[`backend/evaluation/metrics.py`](backend/evaluation/metrics.py); the labelled
+suite in [`backend/evaluation/sample_questions.json`](backend/evaluation/sample_questions.json)):
 
 - **citation_rate** — answered queries that carry ≥ 1 source
 - **avg_source_count** — citations per answer
@@ -145,10 +174,16 @@ Implemented (not just documented) — see
 - **avg_relevance** — expected-keyword coverage
 - **avg_groundedness** — answer terms supported by cited sources
 
-Run against a live stack:
+Run it against a live stack either way:
+
 ```bash
+# CLI
 RAG_BASE_URL=http://localhost:8000 RAG_EVAL_TENANT=demo-corp \
   python -m backend.evaluation.evaluator
+
+# API
+curl -X POST http://localhost:8000/eval/run \
+  -H "Content-Type: application/json" -d '{"tenant_id":"demo-corp"}'
 ```
 
 ---
@@ -159,7 +194,8 @@ Every query emits a structured log line:
 
 ```
 rag_query tenant=demo-corp mode=hybrid retrieval_count=5 selected_sources=5 \
-  confidence=0.812 model=gpt-4o-mini latency_ms=734 tokens=512
+  confidence=0.812 model=gpt-4o-mini embedding_model=all-MiniLM-L6-v2 \
+  latency_ms=734 tokens=512
 ```
 
 The API response also returns `latency_ms`, `confidence`, and `token_usage` so
@@ -198,7 +234,28 @@ push (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ---
 
+## Demo Scenarios
+
+With the stack running and the sample docs ingested for tenant `demo-corp`:
+
+1. **Grounded answer + citations** — *"What is the remote work policy?"* → grounded
+   answer citing `[Source 1]`, with confidence, latency, and per-source
+   vector/keyword/combined scores.
+2. **Exact-term recall (hybrid)** — *"What is the expense reimbursement limit
+   without a receipt?"* → *"under $75"*, found via keyword fusion even when the
+   phrasing differs from the document.
+3. **Abstention** — *"What were the 2019 cloud revenue figures?"* → *"I don't know
+   based on the available documents."* (no source to ground it).
+4. **Tenant isolation** — ingest a doc under `tenant-a`, then query the same
+   content as `tenant-b`; the system abstains — there is no cross-tenant read path.
+5. **Evaluation** — `POST /eval/run` with `{"tenant_id":"demo-corp"}` returns
+   citation rate, abstention accuracy, relevance, and groundedness.
+
+---
+
 ## Roadmap
+
+See [`docs/roadmap.md`](docs/roadmap.md) for the full roadmap.
 
 - [ ] **JWT authentication** to bind users to tenants
 - [ ] **RBAC** for document- and action-level authorization
@@ -211,6 +268,8 @@ push (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 ---
 
 ## Resume Bullets
+
+More variants in [`docs/resume-bullets.md`](docs/resume-bullets.md).
 
 - Designed and built a **multi-tenant RAG reference architecture** (FastAPI,
   React, PostgreSQL/pgvector) with strict per-tenant data isolation enforced at

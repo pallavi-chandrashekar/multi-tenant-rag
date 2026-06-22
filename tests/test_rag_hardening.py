@@ -9,7 +9,7 @@ evaluation harness. Live end-to-end checks live in `test-scenarios.py`
 import pytest
 
 from backend.config import settings
-from backend.services.ingestion import smart_split_text
+from backend.services.chunking import smart_split_text
 from backend.services.retrieval_service import (
     RetrievalService,
     compute_keyword_score,

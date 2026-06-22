@@ -16,10 +16,18 @@ from backend.services.ingestion import process_document
 from backend.services.router import route_query
 from backend.services.llm import chat_with_llm, generate_grounded_answer
 from backend.services.retrieval_service import retrieval_service
+from backend.evaluation.evaluator import Evaluator, DEFAULT_CASES
 
 logger = logging.getLogger("rag.api")
 
 router = APIRouter()
+
+
+def _embedding_model_name() -> str:
+    """Resolve the active embedding model for observability."""
+    if settings.EMBEDDING_PROVIDER == "openai":
+        return settings.OPENAI_EMBEDDING_MODEL
+    return settings.LOCAL_EMBEDDING_MODEL
 
 class SearchPayload(BaseModel):
     text: str
@@ -115,11 +123,13 @@ async def search_rag(payload: SearchPayload, db: Session = Depends(get_db)):
     latency_ms = int((time.perf_counter() - started) * 1000)
 
     # --- OBSERVABILITY (Step 10) -----------------------------------------
+    embedding_model = _embedding_model_name()
     logger.info(
         "rag_query tenant=%s mode=%s retrieval_count=%d selected_sources=%d "
-        "confidence=%.3f model=%s latency_ms=%d tokens=%d",
+        "confidence=%.3f model=%s embedding_model=%s latency_ms=%d tokens=%d",
         tenant_id, mode, len(sources), len(sources), confidence,
-        settings.OPENAI_CHAT_MODEL, latency_ms, token_usage.get("total_tokens", 0),
+        settings.OPENAI_CHAT_MODEL, embedding_model, latency_ms,
+        token_usage.get("total_tokens", 0),
     )
 
     # Legacy field consumed by older frontend builds.
@@ -164,11 +174,34 @@ async def search_rag(payload: SearchPayload, db: Session = Depends(get_db)):
         "mode": mode,
         "tenant_id": tenant_id,
         "latency_ms": latency_ms,
+        "model": settings.OPENAI_CHAT_MODEL,
+        "embedding_model": embedding_model,
         "token_usage": token_usage,
         # --- Backwards-compatible fields ---
         "results": legacy_results,
         "strategy_used": mode,
     }
+
+
+# --- EVALUATION (Step 11): run the offline harness against the live stack ---
+class EvalRunPayload(BaseModel):
+    tenant_id: str
+
+
+@router.post("/eval/run")
+async def run_eval(payload: EvalRunPayload, db: Session = Depends(get_db)):
+    """Run the bundled evaluation suite against the live RAG pipeline for a
+    tenant. Each labelled question is sent through the real search path, then
+    scored for citations, abstention correctness, relevance and groundedness."""
+    # Drive the real search path per case (async), caching responses by query.
+    responses: Dict[str, Dict] = {}
+    for case in DEFAULT_CASES:
+        sp = SearchPayload(text=case.query, tenant_id=payload.tenant_id, chat_history=[])
+        responses[case.query] = await search_rag(sp, db)
+
+    report = Evaluator().run(DEFAULT_CASES, lambda q: responses[q])
+    report["tenant_id"] = payload.tenant_id
+    return report
 
 # ---  LIST CHATS ---
 @router.get("/api/v1/chats")

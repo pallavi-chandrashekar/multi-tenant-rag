@@ -1,11 +1,12 @@
 """Lightweight RAG evaluation harness.
 
 Computes offline quality metrics over a set of labelled cases without requiring
-any third-party eval service. The metric functions are pure and unit-testable;
-``Evaluator.run`` drives them against any ``search_fn`` (the live API, a stub,
-or a mock) so the same harness works in CI and against a deployed stack.
+any third-party eval service. The metric functions live in ``metrics.py`` (pure
+and unit-testable); ``Evaluator.run`` drives them against any ``search_fn`` (the
+live API, a stub, or a mock) so the same harness works in CI, against a deployed
+stack, and behind the ``POST /eval/run`` endpoint.
 
-Metrics (Step 11):
+Metrics (see ``metrics.py``):
 * citation_rate          -- answers that carry >= 1 source.
 * avg_source_count       -- mean citations per answered query.
 * unknown_answer_accuracy-- correct abstention on out-of-scope queries.
@@ -13,15 +14,21 @@ Metrics (Step 11):
 * groundedness           -- proxy: answer terms supported by cited sources.
 """
 
+import json
+import os
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List
-import re
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+# Re-exported so existing imports (`from ...evaluator import relevance_score`)
+# and tests keep working after the metrics were extracted into metrics.py.
+from backend.evaluation.metrics import (  # noqa: F401
+    relevance_score,
+    groundedness_score,
+    is_unknown,
+    summarize,
+)
 
-
-def _tokens(text: str) -> set:
-    return set(_TOKEN_RE.findall((text or "").lower()))
+_QUESTIONS_PATH = os.path.join(os.path.dirname(__file__), "sample_questions.json")
 
 
 @dataclass
@@ -33,35 +40,18 @@ class EvalCase:
     expect_unknown: bool = False
 
 
-def relevance_score(answer: str, expected_keywords: List[str]) -> float:
-    """Fraction of expected keywords present in the answer."""
-    if not expected_keywords:
-        return 1.0
-    a = (answer or "").lower()
-    hits = sum(1 for k in expected_keywords if k.lower() in a)
-    return hits / len(expected_keywords)
-
-
-def groundedness_score(answer: str, sources: List[Dict]) -> float:
-    """Proxy groundedness: share of answer content terms found in sources.
-
-    A high score means the answer's vocabulary is supported by the retrieved
-    context (a cheap stand-in for an LLM/NLI groundedness judge).
-    """
-    answer_terms = _tokens(answer)
-    if not answer_terms:
-        return 0.0
-    source_terms = set()
-    for s in sources:
-        source_terms |= _tokens(s.get("text_snippet") or s.get("content", ""))
-    if not source_terms:
-        return 0.0
-    supported = answer_terms & source_terms
-    return len(supported) / len(answer_terms)
-
-
-def is_unknown(answer: str, unknown_text: str = "I don't know") -> bool:
-    return unknown_text.lower() in (answer or "").lower()
+def load_cases(path: str = _QUESTIONS_PATH) -> List[EvalCase]:
+    """Load labelled evaluation cases from a JSON file."""
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+    return [
+        EvalCase(
+            query=item["query"],
+            expected_keywords=item.get("expected_keywords", []),
+            expect_unknown=item.get("expect_unknown", False),
+        )
+        for item in raw
+    ]
 
 
 class Evaluator:
@@ -99,32 +89,18 @@ class Evaluator:
                 }
             )
 
-        answered = [c for c in per_case if c["answered"]]
-        n = len(per_case) or 1
-        n_answered = len(answered) or 1
-        summary = {
-            "cases": len(per_case),
-            "citation_rate": round(sum(c["has_citations"] for c in answered) / n_answered, 3),
-            "avg_source_count": round(sum(c["source_count"] for c in answered) / n_answered, 3),
-            "unknown_answer_accuracy": round(sum(c["unknown_correct"] for c in per_case) / n, 3),
-            "avg_relevance": round(sum(c["relevance"] for c in per_case) / n, 3),
-            "avg_groundedness": round(sum(c["groundedness"] for c in per_case) / n, 3),
-        }
-        return {"summary": summary, "cases": per_case}
+        return {"summary": summarize(per_case), "cases": per_case}
 
 
-# A small default suite aligned with the bundled sample documents.
-DEFAULT_CASES = [
-    EvalCase("What is the remote work policy?", ["remote", "work"]),
-    EvalCase("How many vacation days do employees get?", ["vacation"]),
-    EvalCase("What are the steps to handle a Sev-1 incident?", ["incident", "sev"]),
-    EvalCase("How do I reset my password?", ["password"]),
-    EvalCase("What is the airspeed velocity of an unladen swallow?", expect_unknown=True),
-]
+# Default suite, loaded from sample_questions.json (aligned with the bundled
+# sample documents). Falls back to an empty list if the file is unreadable.
+try:
+    DEFAULT_CASES = load_cases()
+except (OSError, ValueError):  # pragma: no cover - defensive
+    DEFAULT_CASES = []
 
 
 if __name__ == "__main__":  # pragma: no cover - live smoke run
-    import os
     import requests
 
     base = os.getenv("RAG_BASE_URL", "http://localhost:8000")
@@ -139,6 +115,4 @@ if __name__ == "__main__":  # pragma: no cover - live smoke run
         return r.json()
 
     report = Evaluator().run(DEFAULT_CASES, live_search)
-    import json
-
     print(json.dumps(report, indent=2))
