@@ -16,6 +16,13 @@ from backend.services.retrieval_service import (
 )
 from backend.services import retrieval_service as rs_module
 from backend.services.llm import generate_grounded_answer
+from backend.services.reranker import apply_rerank
+from backend.services.vector_store import (
+    PgVectorStore,
+    HanaVectorStore,
+    get_vector_store,
+)
+from backend.observability.tracing import span, set_attributes
 from backend.evaluation.evaluator import (
     EvalCase,
     Evaluator,
@@ -23,6 +30,8 @@ from backend.evaluation.evaluator import (
     groundedness_score,
     is_unknown,
 )
+from backend.evaluation.ragas_runner import build_samples
+from backend.evaluation.deepeval_runner import build_test_cases
 
 
 # --------------------------------------------------------------------------
@@ -265,3 +274,88 @@ def test_evaluator_run_summary():
     assert summ["unknown_answer_accuracy"] == 1.0  # both handled correctly
     assert summ["citation_rate"] == 1.0  # the one answered case had a citation
     assert summ["avg_relevance"] == pytest.approx(1.0)
+
+
+# --------------------------------------------------------------------------
+# Cross-encoder reranking
+# --------------------------------------------------------------------------
+def test_apply_rerank_reorders_and_truncates():
+    candidates = [
+        {"id": "a", "content": "x", "combined_score": 0.9},
+        {"id": "b", "content": "y", "combined_score": 0.5},
+        {"id": "c", "content": "z", "combined_score": 0.7},
+    ]
+    # Cross-encoder disagrees with fusion: 'b' is most relevant.
+    ranked = apply_rerank(candidates, scores=[0.1, 0.95, 0.4], top_k=2)
+    assert [c["id"] for c in ranked] == ["b", "c"]
+    assert ranked[0]["rerank_score"] == pytest.approx(0.95)
+    assert len(ranked) == 2
+
+
+# --------------------------------------------------------------------------
+# Pluggable vector store
+# --------------------------------------------------------------------------
+def test_get_vector_store_selects_backend():
+    assert isinstance(get_vector_store("pgvector"), PgVectorStore)
+    assert isinstance(get_vector_store("hana"), HanaVectorStore)
+    # Unknown backends fall back to the safe default rather than crashing.
+    assert isinstance(get_vector_store("nope"), PgVectorStore)
+
+
+def test_pgvector_store_search_is_tenant_scoped():
+    store = PgVectorStore()
+    db = _SpySession()
+    store.search(db, [0.0] * 384, "tenant-xyz", limit=10, floor=0.35)
+    sql, params = db.calls[0]
+    assert "tenant_id = :tenant_id" in sql
+    assert params["tenant_id"] == "tenant-xyz"
+
+
+def test_hana_store_raises_until_implemented():
+    with pytest.raises(NotImplementedError):
+        HanaVectorStore().search(None, [0.0], "t", limit=5, floor=0.3)
+
+
+# --------------------------------------------------------------------------
+# OpenTelemetry tracing -- no-op when disabled
+# --------------------------------------------------------------------------
+def test_tracing_is_noop_when_disabled():
+    # OTEL_ENABLED is False by default, so span() yields None and never raises.
+    with span("rag.retrieval", tenant_id="t") as s:
+        assert s is None
+        set_attributes(s, retrieval_count=3)  # must be safe on a None span
+
+
+# --------------------------------------------------------------------------
+# Optional eval runners -- pure sample builders
+# --------------------------------------------------------------------------
+def _stub_search(query):
+    if "scope" in query:
+        return {"answer": "I don't know based on the available documents.", "sources": []}
+    return {"answer": "alpha", "sources": [{"text_snippet": "alpha context"}]}
+
+
+def test_ragas_build_samples_shape_and_excludes_unknown():
+    cases = [
+        EvalCase("known q", expected_keywords=["alpha"]),
+        EvalCase("out of scope", expect_unknown=True),
+    ]
+    samples = build_samples(cases, _stub_search)
+    assert len(samples) == 1  # abstention case excluded
+    s = samples[0]
+    assert set(s) == {"question", "answer", "contexts", "ground_truth"}
+    assert s["contexts"] == ["alpha context"]
+    assert s["ground_truth"] == "alpha"
+
+
+def test_deepeval_build_test_cases_shape_and_excludes_unknown():
+    cases = [
+        EvalCase("known q", expected_keywords=["alpha"]),
+        EvalCase("out of scope", expect_unknown=True),
+    ]
+    records = build_test_cases(cases, _stub_search)
+    assert len(records) == 1
+    r = records[0]
+    assert r["input"] == "known q"
+    assert r["actual_output"] == "alpha"
+    assert r["retrieval_context"] == ["alpha context"]

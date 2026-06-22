@@ -17,6 +17,7 @@ from backend.services.router import route_query
 from backend.services.llm import chat_with_llm, generate_grounded_answer
 from backend.services.retrieval_service import retrieval_service
 from backend.evaluation.evaluator import Evaluator, DEFAULT_CASES
+from backend.observability.tracing import span, set_attributes
 
 logger = logging.getLogger("rag.api")
 
@@ -89,8 +90,13 @@ async def search_rag(payload: SearchPayload, db: Session = Depends(get_db)):
         if payload.chat_history:
             standalone_query = rewrite_query(query_text, payload.chat_history)
 
-        retrieved = retrieval_service.retrieve(db, standalone_query, tenant_id)
-        confidence = retrieval_service.confidence(retrieved)
+        with span("rag.retrieval", tenant_id=tenant_id) as sp:
+            retrieved = retrieval_service.retrieve(db, standalone_query, tenant_id)
+            confidence = retrieval_service.confidence(retrieved)
+            set_attributes(
+                sp, retrieval_count=len(retrieved), confidence=confidence,
+                reranker=settings.RAG_ENABLE_RERANKER,
+            )
 
         # --- Unknown-answer handling (Step 6): no chunks OR low confidence ---
         grounded = (
@@ -105,9 +111,11 @@ async def search_rag(payload: SearchPayload, db: Session = Depends(get_db)):
                 db, [r["document_id"] for r in retrieved]
             )
             sources = retrieval_service.format_sources(retrieved, tenant_id, filenames)
-            answer, token_usage = generate_grounded_answer(
-                standalone_query, sources, payload.chat_history
-            )
+            with span("rag.generate", source_count=len(sources)) as sp:
+                answer, token_usage = generate_grounded_answer(
+                    standalone_query, sources, payload.chat_history
+                )
+                set_attributes(sp, tokens=token_usage.get("total_tokens", 0))
             # Drop citations if the model abstained anyway.
             if answer.strip() == settings.UNKNOWN_ANSWER_TEXT:
                 sources = []

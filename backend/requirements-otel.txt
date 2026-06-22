@@ -1,0 +1,8 @@
+# Optional OpenTelemetry dependencies.
+# Not part of the default image -- install only when OTEL_ENABLED=true:
+#   pip install -r backend/requirements-otel.txt
+
+opentelemetry-sdk>=1.20.0
+opentelemetry-api>=1.20.0
+opentelemetry-instrumentation-fastapi>=0.41b0
+opentelemetry-exporter-otlp-proto-http>=1.20.0

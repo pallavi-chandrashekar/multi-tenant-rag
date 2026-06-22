@@ -1,0 +1,8 @@
+# Optional evaluation dependencies.
+# Not part of the default image -- install only when running RAGAS / DeepEval:
+#   pip install -r backend/requirements-eval.txt
+# Both use an LLM judge and make OpenAI calls (set OPENAI_API_KEY).
+
+ragas>=0.1.0
+datasets>=2.14.0
+deepeval>=0.21.0

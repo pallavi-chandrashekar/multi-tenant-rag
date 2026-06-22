@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.services.embeddings import get_embeddings
+from backend.services.vector_store import get_vector_store
+from backend.services.reranker import rerank
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 # Extremely common words contribute no retrieval signal.
@@ -51,49 +53,30 @@ def compute_keyword_score(query: str, content: str) -> float:
 class RetrievalService:
     """Encapsulates retrieval strategy + tenant isolation."""
 
-    def __init__(self, settings=settings):
+    def __init__(self, settings=settings, vector_store=None):
         self.settings = settings
+        # Pluggable vector backend; defaults to pgvector.
+        self.vector_store = vector_store or get_vector_store()
 
     # -- Vector ------------------------------------------------------------
     def retrieve_vector(
         self, db: Session, query: str, tenant_id: str, top_k: int = None
     ) -> List[Dict]:
-        """Semantic search scoped to ``tenant_id``. Returns raw candidates."""
+        """Semantic search scoped to ``tenant_id``. Returns raw candidates.
+
+        Delegates the nearest-neighbour query to the configured ``VectorStore``
+        so the engine (pgvector, HANA, ...) is swappable without changing the
+        fusion/grounding logic.
+        """
         top_k = top_k or self.settings.RAG_TOP_K
         query_vector = get_embeddings([query])[0]
-        vector_str = str(query_vector)
-
-        rows = db.execute(
-            text(
-                """
-                SELECT id, document_id, content, metadata,
-                       1 - (embedding <=> :vec) AS vector_score
-                FROM chunks
-                WHERE tenant_id = :tenant_id
-                  AND (1 - (embedding <=> :vec)) > :floor
-                ORDER BY embedding <=> :vec
-                LIMIT :limit
-                """
-            ),
-            {
-                "vec": vector_str,
-                "tenant_id": tenant_id,
-                "floor": self.settings.RAG_VECTOR_FLOOR,
-                "limit": top_k * 10,
-            },
-        ).fetchall()
-
-        return [
-            {
-                "id": str(r.id),
-                "document_id": str(r.document_id),
-                "content": r.content,
-                "metadata": r.metadata or {},
-                "vector_score": float(r.vector_score),
-                "keyword_score": 0.0,
-            }
-            for r in rows
-        ]
+        return self.vector_store.search(
+            db,
+            query_vector,
+            tenant_id,
+            limit=top_k * 10,
+            floor=self.settings.RAG_VECTOR_FLOOR,
+        )
 
     # -- Keyword candidates ------------------------------------------------
     def _retrieve_keyword_candidates(
@@ -157,14 +140,32 @@ class RetrievalService:
             )
         return sorted(candidates, key=lambda c: c["combined_score"], reverse=True)
 
+    def _fused_candidates(
+        self, db: Session, query: str, tenant_id: str, k: int
+    ) -> List[Dict]:
+        """Top-``k`` fused candidates, honouring the hybrid feature flag."""
+        if self.settings.RAG_ENABLE_HYBRID_RETRIEVAL:
+            return self.retrieve_hybrid(db, query, tenant_id, k)
+        return self._fuse(query, self.retrieve_vector(db, query, tenant_id, k))[:k]
+
     def retrieve(
         self, db: Session, query: str, tenant_id: str, top_k: int = None
     ) -> List[Dict]:
-        """Strategy entry point honouring the hybrid feature flag."""
-        if self.settings.RAG_ENABLE_HYBRID_RETRIEVAL:
-            return self.retrieve_hybrid(db, query, tenant_id, top_k)
-        ranked = self._fuse(query, self.retrieve_vector(db, query, tenant_id, top_k))
-        return ranked[: (top_k or self.settings.RAG_TOP_K)]
+        """Strategy entry point honouring the hybrid + reranker feature flags.
+
+        With reranking enabled, a wider fused candidate pool
+        (``RAG_RERANK_CANDIDATES``) is gathered and reordered by a cross-encoder
+        before truncating to ``top_k`` -- trading a little latency for retrieval
+        precision.
+        """
+        top_k = top_k or self.settings.RAG_TOP_K
+
+        if self.settings.RAG_ENABLE_RERANKER:
+            pool = max(self.settings.RAG_RERANK_CANDIDATES, top_k)
+            candidates = self._fused_candidates(db, query, tenant_id, pool)
+            return rerank(query, candidates, top_k)
+
+        return self._fused_candidates(db, query, tenant_id, top_k)
 
     # -- Confidence + citations -------------------------------------------
     @staticmethod
@@ -197,6 +198,7 @@ class RetrievalService:
                     "keyword_score": round(r.get("keyword_score", 0.0), 4),
                     "vector_score": round(r.get("vector_score", 0.0), 4),
                     "combined_score": r.get("combined_score", 0.0),
+                    "rerank_score": round(r.get("rerank_score", 0.0), 4),
                 }
             )
         return sources

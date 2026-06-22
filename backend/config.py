@@ -65,6 +65,29 @@ class Settings:
     # Minimum cosine similarity for a vector candidate to be considered.
     RAG_VECTOR_FLOOR: float = _get_float("RAG_VECTOR_FLOOR", 0.35)
 
+    # --- Cross-encoder reranking ------------------------------------------
+    # When enabled, retrieve RAG_RERANK_CANDIDATES fused candidates and reorder
+    # them with a cross-encoder before truncating to RAG_TOP_K. Off by default
+    # so the stack stays light; enabling downloads the reranker model on first
+    # use (sentence-transformers CrossEncoder).
+    RAG_ENABLE_RERANKER: bool = _get_bool("RAG_ENABLE_RERANKER", False)
+    RAG_RERANKER_MODEL: str = os.getenv(
+        "RAG_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+    RAG_RERANK_CANDIDATES: int = _get_int("RAG_RERANK_CANDIDATES", 20)
+
+    # --- Vector store backend ---------------------------------------------
+    # Pluggable vector store. `pgvector` is the default; `hana` selects the
+    # (stubbed) SAP HANA Vector Engine adapter.
+    VECTOR_STORE: str = os.getenv("VECTOR_STORE", "pgvector")
+
+    # --- OpenTelemetry tracing --------------------------------------------
+    # Off by default; enabling requires the opentelemetry-* packages. When
+    # disabled, tracing helpers are no-ops with zero runtime overhead.
+    OTEL_ENABLED: bool = _get_bool("OTEL_ENABLED", False)
+    OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "enterprise-rag")
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+
     # Standard response message when the system cannot ground an answer.
     UNKNOWN_ANSWER_TEXT: str = os.getenv(
         "UNKNOWN_ANSWER_TEXT",

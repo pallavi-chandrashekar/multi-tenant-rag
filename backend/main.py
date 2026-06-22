@@ -11,6 +11,7 @@ from sqlalchemy import text
 from backend.database import engine, get_db, Base
 from backend.models import Document
 from backend.api import routes  # Ensure this file exists!
+from backend.observability.tracing import init_tracing
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Enterprise RAG Platform")
+
+# Initialise OpenTelemetry tracing (no-op unless OTEL_ENABLED).
+init_tracing(app)
 
 # Enable CORS
 app.add_middleware(

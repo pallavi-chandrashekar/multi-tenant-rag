@@ -66,11 +66,13 @@ See [`docs/niw-impact.md`](docs/niw-impact.md) for the broader impact framing.
 
 - 🧠 **Intent router** — `LLM_ONLY`, `SUMMARY`, `SEARCH` modes.
 - 🔎 **Hybrid retrieval** — weighted vector + keyword fusion, tenant-scoped.
+- 🎯 **Cross-encoder reranking** (optional) — precision rerank of fused candidates.
+- 🔌 **Pluggable vector store** — `pgvector` default, swappable adapter interface.
 - 📌 **Grounded answers + citations** — every answer cites the chunks it used.
 - 🤷 **Abstention** — returns "I don't know..." on no/low-confidence retrieval.
 - 🔐 **Multi-tenancy** — strict per-tenant isolation at the database layer.
-- 📊 **Observability** — latency, retrieval counts, confidence, model, tokens.
-- 🧪 **Evaluation harness** — citation rate, groundedness, unknown accuracy.
+- 📊 **Observability** — latency, retrieval counts, confidence, model, tokens, plus optional OpenTelemetry tracing.
+- 🧪 **Evaluation** — built-in harness + optional RAGAS / DeepEval, via CLI or `POST /eval/run`.
 - 💬 **Persistent chat sessions** with rename/delete.
 - 📂 **PDF/TXT/MD ingestion** with sentence-aware chunking.
 
@@ -198,9 +200,12 @@ rag_query tenant=demo-corp mode=hybrid retrieval_count=5 selected_sources=5 \
   latency_ms=734 tokens=512
 ```
 
-The API response also returns `latency_ms`, `confidence`, and `token_usage` so
-clients can display and audit per-answer cost and quality. These fields map
-directly onto OpenTelemetry spans/metrics (roadmap).
+The API response also returns `latency_ms`, `confidence`, `model`,
+`embedding_model`, and `token_usage` so clients can display and audit per-answer
+cost and quality. Setting `OTEL_ENABLED=true` (with
+[`backend/requirements-otel.txt`](backend/requirements-otel.txt)) emits
+OpenTelemetry spans for the retrieval and generation stages; it is a no-op
+otherwise.
 
 ---
 
@@ -218,6 +223,20 @@ All behaviour is environment-driven (see [`.env.example`](.env.example)):
 | `RAG_ENABLE_UNKNOWN_ANSWER` | `true` | Abstention on/off |
 | `RAG_ENABLE_CITATIONS` | `true` | Return sources |
 | `RAG_VECTOR_WEIGHT` / `RAG_KEYWORD_WEIGHT` | `0.7` / `0.3` | Fusion weights |
+| `RAG_ENABLE_RERANKER` | `false` | Cross-encoder rerank of candidates |
+| `VECTOR_STORE` | `pgvector` | Vector backend (`pgvector` / `hana`) |
+| `OTEL_ENABLED` | `false` | OpenTelemetry tracing |
+
+---
+
+## Documentation
+
+- [`docs/architecture.md`](docs/architecture.md) — full system design
+- [`docs/diagrams.md`](docs/diagrams.md) — architecture / ingestion / retrieval / isolation diagrams
+- [`docs/evaluation.md`](docs/evaluation.md) — built-in harness + RAGAS + DeepEval
+- [`docs/benchmarks.md`](docs/benchmarks.md) — recorded quality + latency run
+- [`docs/responsible-ai.md`](docs/responsible-ai.md) — responsible-AI controls
+- [`docs/roadmap.md`](docs/roadmap.md) · [`docs/niw-impact.md`](docs/niw-impact.md) · [`docs/resume-bullets.md`](docs/resume-bullets.md)
 
 ---
 
