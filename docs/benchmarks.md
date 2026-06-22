@@ -25,23 +25,28 @@ below; absolute latency depends on hardware and the OpenAI endpoint.
 | avg_source_count | 3.6 |
 | unknown_answer_accuracy | 1.00 |
 | avg_relevance | 1.00 |
-| avg_groundedness | 0.87 |
+| avg_groundedness | 0.86 |
 
 All five answerable questions returned grounded, cited answers; the one
 out-of-scope question correctly abstained.
 
 ## Latency (end-to-end `/api/v1/search`, server-reported `latency_ms`)
 
+Warm-state (the cold-start request that warms the local embedding model and LLM
+connection is excluded):
+
 | Statistic | ms |
 | --- | --- |
-| p50 (warm) | ~2,150 |
-| avg | ~3,250 |
-| min | ~1,630 |
-| max (first/cold call) | ~8,170 |
+| p50 | ~1,630 |
+| avg | ~1,640 |
+| min | ~1,210 |
+| max | ~2,050 |
 
-The first request is a cold-start outlier (it warms the local embedding model and
-the LLM connection). Steady-state answerable queries land in the **~1.6–2.6 s**
-range; latency is dominated by the LLM generation call, not retrieval.
+Steady-state answerable queries land in the **~1.2–2.0 s** range; latency is
+dominated by the LLM generation call, not retrieval. The first request after a
+cold start is an outlier (~8–12 s) while the embedding model loads. Enabling the
+cross-encoder reranker adds the rerank pass (and a one-time model download)
+without materially changing these headline quality metrics on this corpus.
 
 ## Methodology
 
