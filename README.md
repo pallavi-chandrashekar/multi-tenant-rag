@@ -286,24 +286,6 @@ See [`docs/roadmap.md`](docs/roadmap.md) for the full roadmap.
 
 ---
 
-## Resume Bullets
-
-More variants in [`docs/resume-bullets.md`](docs/resume-bullets.md).
-
-- Designed and built a **multi-tenant RAG reference architecture** (FastAPI,
-  React, PostgreSQL/pgvector) with strict per-tenant data isolation enforced at
-  the database layer.
-- Implemented **hybrid retrieval** (weighted vector + keyword fusion) with a
-  confidence-gated **abstention** path, eliminating ungrounded answers.
-- Engineered **grounded generation with citations** and a structured **response
-  contract** (answer, sources, confidence, latency, token usage) for full
-  auditability.
-- Added an **offline evaluation harness** (citation rate, groundedness,
-  unknown-answer accuracy) and **observability** instrumentation, wired into
-  **CI**.
-
----
-
 ## Why a Reference Architecture?
 
 This project is a reusable reference architecture that codifies
