@@ -23,6 +23,7 @@ from backend.services.vector_store import (
     get_vector_store,
 )
 from backend.observability.tracing import span, set_attributes
+from backend.services.auth import role_allows, Principal, ROLE_PERMISSIONS
 from backend.evaluation.evaluator import (
     EvalCase,
     Evaluator,
@@ -359,3 +360,61 @@ def test_deepeval_build_test_cases_shape_and_excludes_unknown():
     assert r["input"] == "known q"
     assert r["actual_output"] == "alpha"
     assert r["retrieval_context"] == ["alpha context"]
+
+
+# --------------------------------------------------------------------------
+# RBAC role matrix
+# --------------------------------------------------------------------------
+def test_rbac_role_permissions():
+    # viewer: read + eval only
+    assert role_allows("viewer", "query")
+    assert role_allows("viewer", "eval")
+    assert not role_allows("viewer", "ingest")
+    assert not role_allows("viewer", "delete")
+    # editor: + ingest, still no delete
+    assert role_allows("editor", "ingest")
+    assert not role_allows("editor", "delete")
+    # admin: everything
+    assert all(role_allows("admin", a) for a in ["query", "eval", "ingest", "delete", "manage"])
+    # unknown role / action -> denied
+    assert not role_allows("nobody", "query")
+    assert not role_allows("admin", "launch-missiles")
+
+
+def test_principal_defaults():
+    p = Principal(tenant_id="t1")
+    assert p.tenant_id == "t1"
+    assert p.role == "admin"  # fallback principal has full role
+
+
+# --------------------------------------------------------------------------
+# Per-file scoping -- document_ids restricts the tenant-scoped SQL
+# --------------------------------------------------------------------------
+def test_pgvector_store_search_respects_document_ids():
+    store = PgVectorStore()
+    db = _SpySession()
+    store.search(db, [0.0] * 384, "tenant-xyz", limit=10, floor=0.35,
+                 document_ids=["doc-1", "doc-2"])
+    sql, params = db.calls[0]
+    assert "tenant_id = :tenant_id" in sql
+    assert "document_id::text = ANY(:doc_ids)" in sql
+    assert params["doc_ids"] == ["doc-1", "doc-2"]
+
+
+def test_keyword_candidates_respect_document_ids():
+    svc = RetrievalService()
+    db = _SpySession()
+    svc._retrieve_keyword_candidates(db, "refund policy", "tenant-xyz", limit=10,
+                                     document_ids=["doc-9"])
+    sql, params = db.calls[0]
+    assert "document_id::text = ANY(:doc_ids)" in sql
+    assert params["doc_ids"] == ["doc-9"]
+
+
+def test_no_document_ids_means_no_doc_filter():
+    store = PgVectorStore()
+    db = _SpySession()
+    store.search(db, [0.0] * 384, "t", limit=5, floor=0.3)
+    sql, params = db.calls[0]
+    assert "document_id::text = ANY" not in sql
+    assert "doc_ids" not in params

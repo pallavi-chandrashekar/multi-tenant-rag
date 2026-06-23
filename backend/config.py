@@ -76,6 +76,15 @@ class Settings:
     )
     RAG_RERANK_CANDIDATES: int = _get_int("RAG_RERANK_CANDIDATES", 20)
 
+    # --- Authentication (JWT) + RBAC --------------------------------------
+    # When enabled, tenant identity is taken from a verified JWT claim instead
+    # of the trusted X-Tenant-ID header, and role-based authorization is
+    # enforced. Default off so the demo / tests keep using the header.
+    AUTH_ENABLED: bool = _get_bool("AUTH_ENABLED", False)
+    JWT_SECRET: str = os.getenv("JWT_SECRET", "change-me-in-production")
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_EXPIRE_MINUTES: int = _get_int("JWT_EXPIRE_MINUTES", 60)
+
     # --- Vector store backend ---------------------------------------------
     # Pluggable vector store. `pgvector` is the default; `hana` selects the
     # (stubbed) SAP HANA Vector Engine adapter.

@@ -36,3 +36,20 @@ class ChatSession(Base):
     title = Column(String) # First user message usually
     history = Column(JSON) # Stores list of messages [{"role": "user", ...}]
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class User(Base):
+    """A user bound to exactly one tenant, with a single RBAC role.
+
+    Authentication binds tenant identity to a verified token claim instead of a
+    trusted header; the role drives action-level authorization.
+    """
+
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    tenant_id = Column(String, index=True, nullable=False)
+    role = Column(String, nullable=False, default="viewer")  # admin | editor | viewer
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

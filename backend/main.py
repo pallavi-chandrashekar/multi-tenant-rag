@@ -11,6 +11,7 @@ from sqlalchemy import text
 from backend.database import engine, get_db, Base
 from backend.models import Document
 from backend.api import routes  # Ensure this file exists!
+from backend.api import auth_routes
 from backend.observability.tracing import init_tracing
 
 # Configure logging
@@ -34,55 +35,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include existing routes (Search/Ingest)
+# Include API routes (search/ingest/chats/documents/eval) and auth.
 app.include_router(routes.router)
+app.include_router(auth_routes.router)
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
-
-# --- DOCUMENT MANAGEMENT ENDPOINTS ---
-
-@app.get("/api/v1/documents")
-async def list_documents(tenant_id: str = Header(...), db: Session = Depends(get_db)):
-    """Fetch all documents for a specific tenant."""
-    try:
-        results = db.execute(
-            text("SELECT id, filename, created_at FROM documents WHERE tenant_id = :tenant_id ORDER BY created_at DESC"),
-            {"tenant_id": tenant_id}
-        ).fetchall()
-        
-        return {
-            "documents": [
-                {
-                    "id": str(row.id), 
-                    "filename": row.filename, 
-                    "created_at": str(row.created_at).split(" ")[0]
-                } 
-                for row in results
-            ]
-        }
-    except Exception as e:
-        logger.error(f"List docs error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/v1/documents/{doc_id}")
-async def delete_document(doc_id: str, tenant_id: str = Header(...), db: Session = Depends(get_db)):
-    """Delete a document and all its chunks."""
-    try:
-        result = db.execute(
-            text("DELETE FROM documents WHERE id = :id AND tenant_id = :tenant_id"),
-            {"id": doc_id, "tenant_id": tenant_id}
-        )
-        db.commit()
-        
-        if result.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Document not found")
-            
-        return {"status": "success", "message": "Document deleted"}
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Delete error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))

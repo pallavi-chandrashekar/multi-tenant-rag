@@ -71,6 +71,9 @@ See [`docs/niw-impact.md`](docs/niw-impact.md) for the broader impact framing.
 - 📌 **Grounded answers + citations** — every answer cites the chunks it used.
 - 🤷 **Abstention** — returns "I don't know..." on no/low-confidence retrieval.
 - 🔐 **Multi-tenancy** — strict per-tenant isolation at the database layer.
+- 🔑 **JWT auth + RBAC** (optional) — tenant identity from a verified token claim; `viewer`/`editor`/`admin` roles per action.
+- 📡 **Streaming (SSE)** — `POST /api/v1/search/stream` streams answer tokens then a metadata frame.
+- 🗂️ **Per-file scoping** — restrict a query/conversation to a chosen subset of documents.
 - 📊 **Observability** — latency, retrieval counts, confidence, model, tokens, plus optional OpenTelemetry tracing.
 - 🧪 **Evaluation** — built-in harness + optional RAGAS / DeepEval, via CLI or `POST /eval/run`.
 - 💬 **Persistent chat sessions** with rename/delete.
@@ -124,9 +127,31 @@ docker-compose up -d --build
 
 Every `document`, `chunk`, and `chat_session` is owned by a `tenant_id`. All
 retrieval and read queries are filtered by `tenant_id` at the SQL layer, so one
-tenant can never read another tenant's data. Requests are scoped via the
-`X-Tenant-ID` header. There is no cross-tenant read path in the codebase, which
-the test suite asserts directly.
+tenant can never read another tenant's data. By default requests are scoped via
+the `X-Tenant-ID` header. There is no cross-tenant read path in the codebase,
+which the test suite asserts directly.
+
+### Authentication & RBAC (optional)
+
+Set `AUTH_ENABLED=true` to replace the trusted header with verified identity:
+
+```bash
+# 1. Register a user bound to a tenant + role (viewer | editor | admin)
+curl -X POST localhost:8000/auth/register -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"pw","tenant_id":"acme","role":"editor"}'
+
+# 2. Exchange credentials for a JWT (OAuth2 password flow)
+curl -X POST localhost:8000/auth/token -d 'username=alice&password=pw'
+
+# 3. Call the API with the token — tenant + role come from the verified claim
+curl -X POST localhost:8000/api/v1/search -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' -d '{"text":"...","tenant_id":"ignored","chat_history":[]}'
+```
+
+With auth on, the `tenant_id` in the request body/header is ignored — identity is
+the token claim — and roles gate actions: `viewer` (query, eval), `editor`
+(+ ingest), `admin` (+ delete). RBAC is enforced by a `require(action)`
+dependency.
 
 ---
 
@@ -226,6 +251,7 @@ All behaviour is environment-driven (see [`.env.example`](.env.example)):
 | `RAG_ENABLE_RERANKER` | `false` | Cross-encoder rerank of candidates |
 | `VECTOR_STORE` | `pgvector` | Vector backend (`pgvector` / `hana`) |
 | `OTEL_ENABLED` | `false` | OpenTelemetry tracing |
+| `AUTH_ENABLED` | `false` | JWT auth + RBAC (else trusted `X-Tenant-ID` header) |
 
 ---
 

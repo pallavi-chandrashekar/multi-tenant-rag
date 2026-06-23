@@ -103,3 +103,49 @@ def generate_grounded_answer(
     except Exception as e:  # noqa: BLE001
         print(f"Grounded LLM Error: {e}")
         return settings.UNKNOWN_ANSWER_TEXT, usage
+
+
+def _build_grounded_messages(
+    query: str, sources: List[Dict], history: List[Dict] = None
+) -> List[Dict]:
+    """Assemble the grounded chat messages (shared by sync + streaming paths)."""
+    system = GROUNDED_SYSTEM_PROMPT.format(unknown=settings.UNKNOWN_ANSWER_TEXT)
+    messages = [{"role": "system", "content": system}]
+    for m in (history or [])[-4:]:
+        role = "assistant" if m.get("role") in ("ai", "assistant") else "user"
+        messages.append({"role": role, "content": m.get("content", "")})
+    context = _format_context(sources)
+    messages.append(
+        {
+            "role": "user",
+            "content": f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:",
+        }
+    )
+    return messages
+
+
+def stream_grounded_answer(query: str, sources: List[Dict], history: List[Dict] = None):
+    """Yield answer text deltas grounded in ``sources`` (for SSE streaming).
+
+    Yields incremental strings; when no sources are available it yields the
+    abstention text once. Errors degrade to yielding the abstention text.
+    """
+    if not sources:
+        yield settings.UNKNOWN_ANSWER_TEXT
+        return
+
+    messages = _build_grounded_messages(query, sources, history)
+    try:
+        stream = _get_client().chat.completions.create(
+            model=settings.OPENAI_CHAT_MODEL,
+            messages=messages,
+            temperature=0.1,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
+    except Exception as e:  # noqa: BLE001
+        print(f"Grounded LLM Stream Error: {e}")
+        yield settings.UNKNOWN_ANSWER_TEXT

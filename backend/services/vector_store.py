@@ -32,9 +32,13 @@ class VectorStore(ABC):
         tenant_id: str,
         limit: int,
         floor: float,
+        document_ids: List[str] = None,
     ) -> List[Dict]:
         """Return up to ``limit`` candidates for ``tenant_id`` whose cosine
         similarity exceeds ``floor``.
+
+        When ``document_ids`` is provided, the search is further restricted to
+        that subset of the tenant's documents (per-file chat scoping).
 
         Each candidate is a dict with: ``id``, ``document_id``, ``content``,
         ``metadata``, ``vector_score`` and ``keyword_score`` (0.0 here; filled in
@@ -55,26 +59,33 @@ class PgVectorStore(VectorStore):
         tenant_id: str,
         limit: int,
         floor: float,
+        document_ids: List[str] = None,
     ) -> List[Dict]:
         vector_str = str(query_vector)
+        params = {
+            "vec": vector_str,
+            "tenant_id": tenant_id,
+            "floor": floor,
+            "limit": limit,
+        }
+        doc_clause = ""
+        if document_ids:
+            doc_clause = "AND document_id::text = ANY(:doc_ids)"
+            params["doc_ids"] = list(document_ids)
         rows = db.execute(
             text(
-                """
+                f"""
                 SELECT id, document_id, content, metadata,
                        1 - (embedding <=> :vec) AS vector_score
                 FROM chunks
                 WHERE tenant_id = :tenant_id
                   AND (1 - (embedding <=> :vec)) > :floor
+                  {doc_clause}
                 ORDER BY embedding <=> :vec
                 LIMIT :limit
                 """
             ),
-            {
-                "vec": vector_str,
-                "tenant_id": tenant_id,
-                "floor": floor,
-                "limit": limit,
-            },
+            params,
         ).fetchall()
 
         return [
@@ -109,6 +120,7 @@ class HanaVectorStore(VectorStore):
         tenant_id: str,
         limit: int,
         floor: float,
+        document_ids: List[str] = None,
     ) -> List[Dict]:
         raise NotImplementedError(
             "HanaVectorStore is a stub. Implement a tenant-scoped "

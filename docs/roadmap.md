@@ -6,17 +6,20 @@ single application. The roadmap below extends it toward a production deployment.
 
 ## Near term
 
-- [ ] **JWT authentication** — bind users to tenants and remove the trust placed
-      in the raw `X-Tenant-ID` header. Tenant identity becomes a verified claim.
-- [ ] **RBAC** — document- and action-level authorization (who may ingest,
-      delete, query, or run evaluation per tenant).
-- [ ] **Streaming responses (SSE)** — token-by-token answer streaming for lower
-      perceived latency.
-- [ ] **Per-file chat scoping** — restrict a conversation to a chosen subset of a
-      tenant's documents.
+- [ ] **Frontend auth flow** — login screen + token storage so the React UI works
+      with `AUTH_ENABLED=true` (the backend JWT/RBAC is already implemented).
 
 ## Shipped
 
+- [x] **JWT authentication** (optional) — `/auth/token` issues a tenant + role
+      claim; when `AUTH_ENABLED`, tenant identity comes from the verified token
+      instead of the trusted `X-Tenant-ID` header.
+- [x] **RBAC** — `viewer` / `editor` / `admin` roles enforced per action
+      (query, eval, ingest, delete) via a `require(action)` dependency.
+- [x] **Streaming responses (SSE)** — `POST /api/v1/search/stream` streams answer
+      tokens then a final metadata frame (sources, confidence, latency).
+- [x] **Per-file chat scoping** — optional `document_ids` restricts retrieval to a
+      chosen subset of a tenant's documents.
 - [x] **Pluggable vector store interface** — `VectorStore` abstraction with a
       `pgvector` implementation and a HANA adapter stub; swap engines without
       touching retrieval/fusion/grounding.

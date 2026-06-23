@@ -60,13 +60,15 @@ class RetrievalService:
 
     # -- Vector ------------------------------------------------------------
     def retrieve_vector(
-        self, db: Session, query: str, tenant_id: str, top_k: int = None
+        self, db: Session, query: str, tenant_id: str, top_k: int = None,
+        document_ids: List[str] = None,
     ) -> List[Dict]:
         """Semantic search scoped to ``tenant_id``. Returns raw candidates.
 
         Delegates the nearest-neighbour query to the configured ``VectorStore``
         so the engine (pgvector, HANA, ...) is swappable without changing the
-        fusion/grounding logic.
+        fusion/grounding logic. ``document_ids`` optionally restricts the search
+        to a subset of the tenant's documents.
         """
         top_k = top_k or self.settings.RAG_TOP_K
         query_vector = get_embeddings([query])[0]
@@ -76,28 +78,36 @@ class RetrievalService:
             tenant_id,
             limit=top_k * 10,
             floor=self.settings.RAG_VECTOR_FLOOR,
+            document_ids=document_ids,
         )
 
     # -- Keyword candidates ------------------------------------------------
     def _retrieve_keyword_candidates(
-        self, db: Session, query: str, tenant_id: str, limit: int
+        self, db: Session, query: str, tenant_id: str, limit: int,
+        document_ids: List[str] = None,
     ) -> List[Dict]:
         """Postgres full-text candidates so keyword-only hits surface too."""
         words = _tokenize(query)
         if not words:
             return []
         ts_query = " | ".join(words)
+        params = {"tenant_id": tenant_id, "q": ts_query, "limit": limit}
+        doc_clause = ""
+        if document_ids:
+            doc_clause = "AND document_id::text = ANY(:doc_ids)"
+            params["doc_ids"] = list(document_ids)
         rows = db.execute(
             text(
-                """
+                f"""
                 SELECT id, document_id, content, metadata
                 FROM chunks
                 WHERE tenant_id = :tenant_id
                   AND to_tsvector('english', content) @@ to_tsquery('english', :q)
+                  {doc_clause}
                 LIMIT :limit
                 """
             ),
-            {"tenant_id": tenant_id, "q": ts_query, "limit": limit},
+            params,
         ).fetchall()
         return [
             {
@@ -113,17 +123,18 @@ class RetrievalService:
 
     # -- Hybrid ------------------------------------------------------------
     def retrieve_hybrid(
-        self, db: Session, query: str, tenant_id: str, top_k: int = None
+        self, db: Session, query: str, tenant_id: str, top_k: int = None,
+        document_ids: List[str] = None,
     ) -> List[Dict]:
         """Weighted fusion of vector + keyword retrieval, tenant-scoped."""
         top_k = top_k or self.settings.RAG_TOP_K
 
         candidates: Dict[str, Dict] = {}
-        for c in self.retrieve_vector(db, query, tenant_id, top_k):
+        for c in self.retrieve_vector(db, query, tenant_id, top_k, document_ids):
             candidates[c["id"]] = c
 
         for c in self._retrieve_keyword_candidates(
-            db, query, tenant_id, top_k * 10
+            db, query, tenant_id, top_k * 10, document_ids
         ):
             candidates.setdefault(c["id"], c)
 
@@ -141,31 +152,35 @@ class RetrievalService:
         return sorted(candidates, key=lambda c: c["combined_score"], reverse=True)
 
     def _fused_candidates(
-        self, db: Session, query: str, tenant_id: str, k: int
+        self, db: Session, query: str, tenant_id: str, k: int,
+        document_ids: List[str] = None,
     ) -> List[Dict]:
         """Top-``k`` fused candidates, honouring the hybrid feature flag."""
         if self.settings.RAG_ENABLE_HYBRID_RETRIEVAL:
-            return self.retrieve_hybrid(db, query, tenant_id, k)
-        return self._fuse(query, self.retrieve_vector(db, query, tenant_id, k))[:k]
+            return self.retrieve_hybrid(db, query, tenant_id, k, document_ids)
+        vec = self.retrieve_vector(db, query, tenant_id, k, document_ids)
+        return self._fuse(query, vec)[:k]
 
     def retrieve(
-        self, db: Session, query: str, tenant_id: str, top_k: int = None
+        self, db: Session, query: str, tenant_id: str, top_k: int = None,
+        document_ids: List[str] = None,
     ) -> List[Dict]:
         """Strategy entry point honouring the hybrid + reranker feature flags.
 
         With reranking enabled, a wider fused candidate pool
         (``RAG_RERANK_CANDIDATES``) is gathered and reordered by a cross-encoder
         before truncating to ``top_k`` -- trading a little latency for retrieval
-        precision.
+        precision. ``document_ids`` optionally restricts retrieval to a subset of
+        the tenant's documents (per-file chat scoping).
         """
         top_k = top_k or self.settings.RAG_TOP_K
 
         if self.settings.RAG_ENABLE_RERANKER:
             pool = max(self.settings.RAG_RERANK_CANDIDATES, top_k)
-            candidates = self._fused_candidates(db, query, tenant_id, pool)
+            candidates = self._fused_candidates(db, query, tenant_id, pool, document_ids)
             return rerank(query, candidates, top_k)
 
-        return self._fused_candidates(db, query, tenant_id, top_k)
+        return self._fused_candidates(db, query, tenant_id, top_k, document_ids)
 
     # -- Confidence + citations -------------------------------------------
     @staticmethod
