@@ -302,13 +302,7 @@ With the stack running and the sample docs ingested for tenant `demo-corp`:
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the full roadmap.
 
-- [ ] **JWT authentication** to bind users to tenants
-- [ ] **RBAC** for document- and action-level authorization
-- [ ] **Kubernetes** manifests + Helm chart for production deployment
-- [ ] **HANA Vector adapter** (pluggable vector store interface)
-- [ ] **OpenTelemetry** traces/metrics export
-- [ ] **RAGAS** integration for richer offline evaluation
-- [ ] Streaming (SSE) responses and per-file chat scoping
+All near-term features have shipped. Remaining work focuses on production deployment (Kubernetes, HANA adapter, background ingestion) and responsible-AI quality (LLM-as-judge groundedness, PII redaction).
 
 ---
 

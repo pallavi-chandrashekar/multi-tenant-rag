@@ -6,11 +6,13 @@ single application. The roadmap below extends it toward a production deployment.
 
 ## Near term
 
-- [ ] **Frontend auth flow** — login screen + token storage so the React UI works
-      with `AUTH_ENABLED=true` (the backend JWT/RBAC is already implemented).
+*All near-term items shipped.*
 
 ## Shipped
 
+- [x] **Frontend auth flow** — `LoginGate` component with login/register forms; token +
+      role persisted in `localStorage`; `apiFetch()` attaches `Authorization: Bearer`
+      header; identity card in sidebar; graceful 401 → logout.
 - [x] **JWT authentication** (optional) — `/auth/token` issues a tenant + role
       claim; when `AUTH_ENABLED`, tenant identity comes from the verified token
       instead of the trusted `X-Tenant-ID` header.

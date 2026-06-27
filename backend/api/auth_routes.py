@@ -10,6 +10,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.config import settings
 from backend.database import get_db
 from backend.models import User
 from backend.services.auth import (
@@ -20,6 +21,12 @@ from backend.services.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/config")
+def auth_config():
+    """Public: lets the frontend decide whether to show the login gate."""
+    return {"auth_enabled": settings.AUTH_ENABLED}
 
 
 class RegisterPayload(BaseModel):
