@@ -23,7 +23,8 @@ import uuid
 from typing import Optional
 
 import pytest
-import requests
+
+requests = pytest.importorskip("requests")  # skip whole module in CI (no live stack)
 
 pytestmark = pytest.mark.integration
 
