@@ -463,6 +463,7 @@ def test_password_hash_verify_round_trip():
 # get_principal / require() dependency behaviour (called directly, no DI)
 # --------------------------------------------------------------------------
 def test_get_principal_returns_admin_fallback_when_auth_disabled(monkeypatch):
+    pytest.importorskip("fastapi")
     monkeypatch.setattr(settings, "AUTH_ENABLED", False)
     from backend.api.deps import get_principal
 
@@ -472,6 +473,7 @@ def test_get_principal_returns_admin_fallback_when_auth_disabled(monkeypatch):
 
 
 def test_get_principal_raises_401_when_no_token_and_auth_enabled(monkeypatch):
+    pytest.importorskip("fastapi")
     monkeypatch.setattr(settings, "AUTH_ENABLED", True)
     from fastapi import HTTPException
 
@@ -483,6 +485,7 @@ def test_get_principal_raises_401_when_no_token_and_auth_enabled(monkeypatch):
 
 
 def test_require_raises_403_when_role_lacks_action(monkeypatch):
+    pytest.importorskip("fastapi")
     monkeypatch.setattr(settings, "AUTH_ENABLED", True)
     from fastapi import HTTPException
 
@@ -496,6 +499,7 @@ def test_require_raises_403_when_role_lacks_action(monkeypatch):
 
 
 def test_require_passes_through_when_auth_disabled(monkeypatch):
+    pytest.importorskip("fastapi")
     monkeypatch.setattr(settings, "AUTH_ENABLED", False)
     from backend.api.deps import require
 
