@@ -418,3 +418,88 @@ def test_no_document_ids_means_no_doc_filter():
     sql, params = db.calls[0]
     assert "document_id::text = ANY" not in sql
     assert "doc_ids" not in params
+
+
+# --------------------------------------------------------------------------
+# JWT create / decode (requires python-jose; skipped in lite CI)
+# --------------------------------------------------------------------------
+def test_jwt_encode_decode_round_trip():
+    pytest.importorskip("jose")
+    from backend.services.auth import create_access_token, decode_token
+
+    token = create_access_token(tenant_id="acme", role="editor", username="alice")
+    assert isinstance(token, str) and len(token) > 20
+    principal = decode_token(token)
+    assert principal.tenant_id == "acme"
+    assert principal.role == "editor"
+    assert principal.username == "alice"
+
+
+def test_jwt_decode_raises_401_on_bad_token():
+    pytest.importorskip("jose")
+    from fastapi import HTTPException
+
+    from backend.services.auth import decode_token
+
+    with pytest.raises(HTTPException) as exc:
+        decode_token("not.a.valid.token")
+    assert exc.value.status_code == 401
+
+
+# --------------------------------------------------------------------------
+# Password hashing (requires passlib; skipped in lite CI)
+# --------------------------------------------------------------------------
+def test_password_hash_verify_round_trip():
+    pytest.importorskip("passlib")
+    from backend.services.auth import hash_password, verify_password
+
+    hashed = hash_password("s3cr3t!")
+    assert hashed != "s3cr3t!"
+    assert verify_password("s3cr3t!", hashed)
+    assert not verify_password("wrong-password", hashed)
+
+
+# --------------------------------------------------------------------------
+# get_principal / require() dependency behaviour (called directly, no DI)
+# --------------------------------------------------------------------------
+def test_get_principal_returns_admin_fallback_when_auth_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_ENABLED", False)
+    from backend.api.deps import get_principal
+
+    p = get_principal(token=None, x_tenant_id="acme")
+    assert p.tenant_id == "acme"
+    assert p.role == "admin"
+
+
+def test_get_principal_raises_401_when_no_token_and_auth_enabled(monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_ENABLED", True)
+    from fastapi import HTTPException
+
+    from backend.api.deps import get_principal
+
+    with pytest.raises(HTTPException) as exc:
+        get_principal(token=None, x_tenant_id="acme")
+    assert exc.value.status_code == 401
+
+
+def test_require_raises_403_when_role_lacks_action(monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_ENABLED", True)
+    from fastapi import HTTPException
+
+    from backend.api.deps import require
+
+    dep = require("ingest")
+    viewer = Principal(tenant_id="t", role="viewer")
+    with pytest.raises(HTTPException) as exc:
+        dep(principal=viewer)
+    assert exc.value.status_code == 403
+
+
+def test_require_passes_through_when_auth_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_ENABLED", False)
+    from backend.api.deps import require
+
+    dep = require("delete")
+    viewer = Principal(tenant_id="t", role="viewer")
+    result = dep(principal=viewer)
+    assert result.tenant_id == "t"
