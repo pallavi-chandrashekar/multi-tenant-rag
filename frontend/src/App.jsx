@@ -40,45 +40,78 @@ function LoginGate({ onLogin, onRegister }) {
     } finally { setBusy(false) }
   }
 
+  const features = [
+    { icon: <Database size={16} />, text: "Multi-tenant isolation at the SQL layer" },
+    { icon: <Layers size={16} />, text: "Hybrid vector + keyword retrieval" },
+    { icon: <Lock size={16} />, text: "JWT auth + RBAC (viewer / editor / admin)" },
+    { icon: <Cpu size={16} />, text: "SSE streaming with grounded citations" },
+    { icon: <CheckCircle size={16} />, text: "Abstention on low-confidence queries" },
+  ]
+
   return (
     <div className="login-container">
-      <form className="login-card" onSubmit={submit}>
-        <div className="brand" style={{ justifyContent: 'center', marginBottom: '1rem' }}>
-          <Lock size={22} /> <span>Enterprise RAG</span>
+
+      {/* ── Left branding panel ── */}
+      <div className="login-branding">
+        <div className="login-brand-logo">
+          <Lock size={36} />
+          <span>Enterprise RAG</span>
         </div>
-        <div className="login-title">{mode === "login" ? "Sign in" : "Create an account"}</div>
+        <p className="login-brand-tagline">
+          Grounded answers over your documents — with citations, confidence scores, and zero hallucination tolerance.
+        </p>
+        <ul className="login-feature-list">
+          {features.map((f, i) => (
+            <li key={i} className="login-feature-item">
+              <span className="login-feature-icon">{f.icon}</span>
+              {f.text}
+            </li>
+          ))}
+        </ul>
+        <div className="login-brand-footer">Reference architecture · MIT license</div>
+      </div>
 
-        <input className="input-field" placeholder="Username" value={username}
-          onChange={e => setUsername(e.target.value)} autoFocus />
-        <input className="input-field" type="password" placeholder="Password" value={password}
-          onChange={e => setPassword(e.target.value)} />
+      {/* ── Right form panel ── */}
+      <div className="login-form-panel">
+        <form className="login-card" onSubmit={submit}>
+          <div className="login-title">{mode === "login" ? "Welcome back" : "Create an account"}</div>
+          <div className="login-subtitle">
+            {mode === "login" ? "Sign in to your workspace" : "Join your team workspace"}
+          </div>
 
-        {mode === "register" && (
-          <>
-            <input className="input-field" placeholder="Tenant ID" value={tenant}
-              onChange={e => setTenant(e.target.value)} />
-            <select className="input-field" value={role} onChange={e => setRole(e.target.value)}>
-              <option value="viewer">viewer (query, eval)</option>
-              <option value="editor">editor (+ ingest)</option>
-              <option value="admin">admin (+ delete)</option>
-            </select>
-          </>
-        )}
+          <input className="input-field" placeholder="Username" value={username}
+            onChange={e => setUsername(e.target.value)} autoFocus />
+          <input className="input-field" type="password" placeholder="Password" value={password}
+            onChange={e => setPassword(e.target.value)} />
 
-        {error && <div className="login-error"><AlertCircle size={14} /> {error}</div>}
-
-        <button className="send-btn login-btn" type="submit" disabled={busy}>
-          {busy ? "Please wait…" : (mode === "login" ? "Sign in" : "Register & sign in")}
-        </button>
-
-        <div className="login-switch">
-          {mode === "login" ? (
-            <span>Need an account? <a onClick={() => { setMode("register"); setError(null) }}>Register</a></span>
-          ) : (
-            <span>Have an account? <a onClick={() => { setMode("login"); setError(null) }}>Sign in</a></span>
+          {mode === "register" && (
+            <>
+              <input className="input-field" placeholder="Tenant ID" value={tenant}
+                onChange={e => setTenant(e.target.value)} />
+              <select className="input-field" value={role} onChange={e => setRole(e.target.value)}>
+                <option value="viewer">viewer (query, eval)</option>
+                <option value="editor">editor (+ ingest)</option>
+                <option value="admin">admin (+ delete)</option>
+              </select>
+            </>
           )}
-        </div>
-      </form>
+
+          {error && <div className="login-error"><AlertCircle size={14} /> {error}</div>}
+
+          <button className="login-submit-btn" type="submit" disabled={busy}>
+            {busy ? "Please wait…" : (mode === "login" ? "Sign in" : "Register & sign in")}
+          </button>
+
+          <div className="login-switch">
+            {mode === "login" ? (
+              <span>Need an account? <a onClick={() => { setMode("register"); setError(null) }}>Register</a></span>
+            ) : (
+              <span>Have an account? <a onClick={() => { setMode("login"); setError(null) }}>Sign in</a></span>
+            )}
+          </div>
+        </form>
+      </div>
+
     </div>
   )
 }
